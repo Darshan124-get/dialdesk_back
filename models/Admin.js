@@ -6,6 +6,14 @@ const AdminSchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true, lowercase: true },
   password_hash: { type: String, required: true },
+  profile_image_url: { type: String, default: null },
+  additional_info: {
+    phone: { type: String, default: '' },
+    department: { type: String, default: '' },
+    bio: { type: String, default: '' },
+    address: { type: String, default: '' }
+  },
+  updated_at: { type: Date, default: Date.now },
   created_at: { type: Date, default: Date.now }
 });
 

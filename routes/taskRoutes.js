@@ -51,28 +51,60 @@ router.post(
         s3Key: s3Key
       });
       
+      // Upload to S3 - REQUIRED
       const uploadResult = await uploadToS3(req.file, s3Key);
 
       if (!uploadResult.success) {
         // If S3 upload fails, clean up the task
         await Task.deleteOne({ task_id: task.task_id });
+        
+        // Provide detailed error message
+        let errorMessage = 'Failed to upload file to S3';
+        let errorDetails = uploadResult.error || 'Unknown error';
+        
+        if (errorDetails.includes('credentials') || errorDetails.includes('not valid') || errorDetails.includes('Resolved credential')) {
+          errorMessage = 'AWS S3 credentials are invalid or not configured. Please check AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env file.';
+          errorDetails = 'Invalid AWS credentials. Please verify your AWS credentials are correct.';
+        } else if (errorDetails.includes('bucket') || errorDetails.includes('NoSuchBucket')) {
+          errorMessage = `S3 bucket "${process.env.S3_BUCKET_NAME || 'bialdesk'}" not found or inaccessible. Please check bucket name and permissions.`;
+          errorDetails = `Bucket "${process.env.S3_BUCKET_NAME || 'bialdesk'}" does not exist or you don't have access.`;
+        } else if (errorDetails.includes('AccessDenied')) {
+          errorMessage = 'Access denied to S3 bucket. Please check AWS IAM permissions.';
+          errorDetails = 'Your AWS credentials do not have permission to upload to this bucket.';
+        }
+        
+        console.error('S3 Upload Failed:', {
+          error: errorDetails,
+          bucket: process.env.S3_BUCKET_NAME,
+          region: process.env.AWS_REGION,
+          hasAccessKey: !!process.env.AWS_ACCESS_KEY_ID,
+          hasSecretKey: !!process.env.AWS_SECRET_ACCESS_KEY
+        });
+        
         return res.status(500).json({ 
-          message: 'Failed to upload file to S3', 
-          error: uploadResult.error 
+          message: errorMessage,
+          error: errorDetails,
+          aws_config: {
+            bucket: process.env.S3_BUCKET_NAME,
+            region: process.env.AWS_REGION,
+            has_credentials: !!(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY)
+          }
         });
       }
 
-      // Update task with S3 URL
+      const s3Url = uploadResult.location;
+
+      // Update task with S3 URL or local URL
       await Task.findOneAndUpdate(
         { task_id: task.task_id },
-        { excel_file_url: uploadResult.location }
+        { excel_file_url: s3Url }
       );
 
       // Create Excel metadata record
       const excelRecord = await Excel.create({
         fileName: taskName,
         originalFileName: req.file.originalname,
-        s3Url: uploadResult.location,
+        s3Url: s3Url,
         s3Key: s3Key,
         assignedTo: assigned_teacher_id,
         uploadedBy: uploadedBy,
@@ -83,7 +115,27 @@ router.post(
       });
 
       // Process Excel file to extract contacts
-      const wb = xlsx.readFile(req.file.path);
+      // Since we're using memoryStorage, read from buffer instead of path
+      let wb;
+      try {
+        if (req.file.buffer) {
+          wb = xlsx.read(req.file.buffer, { type: 'buffer' });
+        } else if (req.file.path) {
+          wb = xlsx.readFile(req.file.path);
+        } else {
+          throw new Error('File buffer or path not available');
+        }
+      } catch (excelError) {
+        console.error('Excel parsing error:', excelError);
+        // Clean up task if Excel parsing fails
+        await Task.deleteOne({ task_id: task.task_id });
+        await Excel.deleteOne({ excelId: excelRecord.excelId });
+        return res.status(400).json({ 
+          message: 'Failed to parse Excel file. Please ensure it is a valid Excel file.',
+          error: excelError.message 
+        });
+      }
+      
       const ws = wb.Sheets[wb.SheetNames[0]];
       const rows = xlsx.utils.sheet_to_json(ws, { defval: '' });
 
@@ -114,24 +166,66 @@ router.post(
         );
       }
 
-      // Clean up local file
-      const fs = await import('fs');
-      fs.unlinkSync(req.file.path);
+      // Clean up local file if it exists (only if using diskStorage)
+      if (req.file.path) {
+        try {
+          const fs = await import('fs');
+          if (fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
+          }
+        } catch (cleanupError) {
+          console.warn('Failed to cleanup local file:', cleanupError);
+          // Don't fail the request if cleanup fails
+        }
+      }
 
       res.status(201).json({ 
-        task_id: task.task_id, 
+        task: {
+          task_id: task.task_id,
+          task_name: task.task_name,
+          status: task.status
+        },
         excel_id: excelRecord.excelId,
         contacts_created: contactsToInsert.length,
-        s3_url: uploadResult.location
+        s3_url: s3Url,
+        message: 'Task created successfully',
+        storage_mode: 's3'
       });
 
     } catch (error) {
       console.error('Upload error:', error);
+      console.error('Error stack:', error.stack);
       
       // Clean up task if it was created
       if (task && task.task_id) {
-        await Task.deleteOne({ task_id: task.task_id });
+        try {
+          await Task.deleteOne({ task_id: task.task_id });
+          // Also try to delete Excel record if it exists
+          const excelRecord = await Excel.findOne({ taskId: task.task_id });
+          if (excelRecord) {
+            await Excel.deleteOne({ excelId: excelRecord.excelId });
+          }
+        } catch (cleanupError) {
+          console.error('Failed to cleanup task:', cleanupError);
+        }
       }
+      
+      // Provide user-friendly error message
+      let errorMessage = 'Failed to create task';
+      if (error.message) {
+        if (error.message.includes('S3') || error.message.includes('AWS')) {
+          errorMessage = 'File upload failed. Please check AWS S3 configuration.';
+        } else if (error.message.includes('Excel') || error.message.includes('parse')) {
+          errorMessage = 'Failed to parse Excel file. Please ensure it is a valid Excel file with "Student Name" and "Phone" columns.';
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
+      res.status(500).json({ 
+        message: errorMessage,
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
       
       // Clean up local file
       const fs = await import('fs');

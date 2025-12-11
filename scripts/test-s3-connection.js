@@ -1,5 +1,9 @@
+import dotenv from 'dotenv';
 import { S3Client, ListBucketsCommand } from '@aws-sdk/client-s3';
 import { AWS_CONFIG } from '../config/aws-config.js';
+
+// Load environment variables
+dotenv.config();
 
 // Test S3 connection
 async function testS3Connection() {

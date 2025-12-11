@@ -16,12 +16,33 @@ const BUCKET_NAME = AWS_CONFIG.bucketName;
 // Upload file to S3
 export const uploadToS3 = async (file, key) => {
   try {
+    // Check if AWS credentials are configured
+    if (!AWS_CONFIG.accessKeyId || !AWS_CONFIG.secretAccessKey || 
+        AWS_CONFIG.accessKeyId === 'your_aws_access_key_id' ||
+        AWS_CONFIG.secretAccessKey === 'your_aws_secret_access_key') {
+      console.error('S3 Upload Error: AWS credentials not configured');
+      return {
+        success: false,
+        error: 'AWS S3 credentials not configured. Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in environment variables. For local development, you may need to configure AWS S3 or use a development mode.'
+      };
+    }
+
+    if (!BUCKET_NAME || BUCKET_NAME === 'your_bucket_name') {
+      console.error('S3 Upload Error: Bucket name not configured');
+      return {
+        success: false,
+        error: 'S3 bucket name not configured. Please set S3_BUCKET_NAME in environment variables.'
+      };
+    }
+
     console.log('S3 Upload - File details:', {
       originalname: file.originalname,
       mimetype: file.mimetype,
       size: file.size,
       bufferLength: file.buffer ? file.buffer.length : 'no buffer',
-      key: key
+      key: key,
+      bucket: BUCKET_NAME,
+      region: AWS_CONFIG.region
     });
 
     if (!file.buffer || file.buffer.length === 0) {
@@ -36,7 +57,7 @@ export const uploadToS3 = async (file, key) => {
       Bucket: BUCKET_NAME,
       Key: key,
       Body: file.buffer,
-      ContentType: file.mimetype,
+      ContentType: file.mimetype || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       Metadata: {
         originalName: file.originalname,
         uploadedAt: new Date().toISOString()
@@ -50,17 +71,38 @@ export const uploadToS3 = async (file, key) => {
       uploadedSize: file.buffer.length
     });
     
+    const region = AWS_CONFIG.region || 'eu-north-1';
     return {
       success: true,
-      location: `https://${BUCKET_NAME}.s3.eu-north-1.amazonaws.com/${key}`,
+      location: `https://${BUCKET_NAME}.s3.${region}.amazonaws.com/${key}`,
       etag: result.ETag,
       versionId: result.VersionId
     };
   } catch (error) {
     console.error('S3 Upload Error:', error);
+    console.error('Error details:', {
+      name: error.name,
+      message: error.message,
+      code: error.Code || error.code,
+      statusCode: error.$metadata?.httpStatusCode
+    });
+    
+    let errorMessage = error.message || 'Unknown S3 upload error';
+    
+    // Provide more specific error messages
+    if (error.name === 'CredentialsProviderError' || error.message?.includes('credentials')) {
+      errorMessage = 'AWS credentials are invalid or not configured. Please check AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.';
+    } else if (error.name === 'NoSuchBucket' || error.Code === 'NoSuchBucket') {
+      errorMessage = `S3 bucket "${BUCKET_NAME}" does not exist. Please check S3_BUCKET_NAME configuration.`;
+    } else if (error.name === 'AccessDenied' || error.Code === 'AccessDenied') {
+      errorMessage = 'Access denied to S3 bucket. Please check AWS credentials and bucket permissions.';
+    } else if (error.message?.includes('ENOTFOUND') || error.message?.includes('network')) {
+      errorMessage = 'Network error connecting to AWS S3. Please check your internet connection.';
+    }
+    
     return {
       success: false,
-      error: error.message
+      error: errorMessage
     };
   }
 };

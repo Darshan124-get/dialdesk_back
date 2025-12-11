@@ -1,5 +1,9 @@
 // AWS Configuration
 // In production, use environment variables instead of hardcoded values
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
 
 export const AWS_CONFIG = {
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
