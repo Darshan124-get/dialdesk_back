@@ -1,0 +1,2 @@
+D:/dialdesk--v.2.0/android/app/.cxx/Debug/6k1l2df1/armeabi-v7a/CMakeFiles/edit_cache.dir
+D:/dialdesk--v.2.0/android/app/.cxx/Debug/6k1l2df1/armeabi-v7a/CMakeFiles/rebuild_cache.dir

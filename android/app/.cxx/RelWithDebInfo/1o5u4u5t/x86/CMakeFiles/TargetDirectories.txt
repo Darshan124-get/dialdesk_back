@@ -1,0 +1,2 @@
+D:/dialdesk/android/app/.cxx/RelWithDebInfo/1o5u4u5t/x86/CMakeFiles/edit_cache.dir
+D:/dialdesk/android/app/.cxx/RelWithDebInfo/1o5u4u5t/x86/CMakeFiles/rebuild_cache.dir

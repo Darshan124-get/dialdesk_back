@@ -1,0 +1,1 @@
+ D:\\dialdesk--v.2.0\\.dart_tool\\flutter_build\\871db2dbb515668d0ceb10b2efecc83d\\native_assets.json: 
