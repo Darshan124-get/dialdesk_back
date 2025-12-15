@@ -10,6 +10,8 @@ export function setToken(token) {
 
 export function clearToken() {
   localStorage.removeItem('admin_token');
+  localStorage.removeItem('admin_name');
+  localStorage.removeItem('admin_email');
 }
 
 export function authHeader() {
